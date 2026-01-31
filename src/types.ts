@@ -1,0 +1,94 @@
+/**
+ * Pearl configuration types
+ */
+
+export interface PearlConfig {
+  server: ServerConfig;
+  memory: MemoryConfig;
+  extraction: ExtractionConfig;
+  embedding: EmbeddingConfig;
+  retrieval: RetrievalConfig;
+  routing: RoutingConfig;
+  backends: BackendsConfig;
+  logging?: LoggingConfig;
+}
+
+export interface ServerConfig {
+  port: number;
+  host: string;
+  cors?: boolean;
+}
+
+export interface MemoryConfig {
+  store: 'sqlite';
+  path: string;
+}
+
+export interface ExtractionConfig {
+  enabled: boolean;
+  model: string;
+  async: boolean;
+  minConfidence: number;
+  extractFromAssistant: boolean;
+  dedupWindowSeconds: number;
+}
+
+export interface EmbeddingConfig {
+  provider: 'ollama' | 'openai';
+  model: string;
+  dimensions: number;
+}
+
+export interface RetrievalConfig {
+  maxMemories: number;
+  minSimilarity: number;
+  tokenBudget: number;
+  recencyBoost: boolean;
+  typeWeights?: Record<string, number>;
+}
+
+export interface RoutingConfig {
+  classifier: string;
+  defaultModel: string;
+  rules: RoutingRuleConfig[];
+  fallback?: Record<string, string[]>;
+  agentOverrides?: Record<string, { defaultModel: string }>;
+}
+
+export interface RoutingRuleConfig {
+  name: string;
+  match: MatchConditions;
+  model: string;
+  priority: number;
+}
+
+export interface MatchConditions {
+  default?: boolean;
+  complexity?: 'low' | 'medium' | 'high';
+  type?: string;
+  sensitive?: boolean;
+  estimatedTokens?: string;
+}
+
+export interface BackendsConfig {
+  anthropic?: ProviderConfig;
+  openai?: ProviderConfig;
+  ollama?: OllamaConfig;
+  openrouter?: ProviderConfig;
+}
+
+export interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  defaultParams?: Record<string, unknown>;
+}
+
+export interface OllamaConfig {
+  baseUrl: string;
+  defaultParams?: Record<string, unknown>;
+}
+
+export interface LoggingConfig {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  file?: string;
+}
