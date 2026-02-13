@@ -1,8 +1,20 @@
-# Pearl 🦪
+# Pearl Enhanced 🦪✨
 
 **Persistent memory and intelligent routing for OpenClaw agents.**
 
+> **Note:** This is an enhanced fork of [openclaw-pearl](https://github.com/samhotchkiss/openclaw-pearl) by [Sam Hotchkiss](https://github.com/samhotchkiss), with additional security improvements and advanced routing features.
+
 Pearl is a model proxy that sits between OpenClaw and LLM providers. It intercepts prompts, extracts memorable content, augments prompts with relevant memories, and routes requests to the optimal model based on cost/speed/quality requirements.
+
+## ✨ Enhancements in This Fork
+
+- **🔐 Security Hardening**: Environment variable configuration, localhost-only binding, clean git history
+- **⚖️ Weighted Classifier**: ClawRouter-style weighted scoring for more accurate request classification
+- **🧪 A/B Testing Framework**: Compare heuristic vs. weighted classifiers with detailed metrics
+- **📊 Enhanced Routing**: Priority-based rules, fallback chains, token-aware routing
+- **📚 Comprehensive Documentation**: Detailed guides for routing, A/B testing, and integration
+
+All enhancements maintain full compatibility with the original Pearl API.
 
 ## Why Pearl?
 
@@ -125,11 +137,17 @@ Additional endpoints:
 
 ```bash
 # Clone
-git clone https://github.com/samhotchkiss/openclaw-pearl
-cd openclaw-pearl
+git clone https://github.com/wang2476/openclaw-pearl-enhanced
+cd openclaw-pearl-enhanced
 
 # Install deps
 npm install
+
+# Set up environment variables
+cp pearl.yaml.example pearl.yaml
+# Edit pearl.yaml or set environment variables:
+export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"
 
 # Run tests
 npm test
@@ -138,12 +156,19 @@ npm test
 npm run dev
 ```
 
-## Roadmap
+## Contributing
 
-**[📋 Project Board](https://github.com/samhotchkiss/openclaw-pearl/projects?query=is%3Aopen)** — Track progress on all issues
+Contributions are welcome! This fork aims to maintain compatibility with the original Pearl while adding security and routing enhancements.
 
-See [GitHub Issues](https://github.com/samhotchkiss/openclaw-pearl/issues) for detailed specs.
+See [GitHub Issues](https://github.com/wang2476/openclaw-pearl-enhanced/issues) for planned features and bugs.
+
+To contribute features back to the original Pearl, see [samhotchkiss/openclaw-pearl](https://github.com/samhotchkiss/openclaw-pearl).
 
 ## License
 
-MIT
+MIT License
+
+Copyright (c) 2026 Sam Hotchkiss (original author)
+Copyright (c) 2026 wang2476 (enhancements)
+
+See [LICENSE](LICENSE) file for details.
