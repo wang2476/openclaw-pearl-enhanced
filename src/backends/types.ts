@@ -14,6 +14,8 @@ export interface ChatRequest {
   maxTokens?: number;
   temperature?: number;
   topP?: number;
+  tools?: unknown[];
+  tool_choice?: unknown;
   metadata?: {
     agentId?: string;
     sessionId?: string;

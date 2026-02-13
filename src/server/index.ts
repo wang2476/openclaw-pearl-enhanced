@@ -73,12 +73,27 @@ function normalizeContent(content: MessageContent): string {
   return String(content ?? '');
 }
 
+/**
+ * Format duration in human-readable format: "2.5s" or "1m 23s"
+ */
+function formatDuration(ms: number): string {
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
 interface ChatCompletionRequest {
   model: string;
   messages: ChatMessage[];
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  tools?: unknown[];
+  tool_choice?: unknown;
   metadata?: {
     agent_id?: string;
     session_id?: string;
@@ -102,6 +117,16 @@ interface ChatCompletionResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+  };
+  pearl?: {
+    routing: {
+      selectedModel: string;
+      requestedModel: string;
+    };
+    performance: {
+      totalTime: string;
+      totalTimeMs: number;
+    };
   };
 }
 
@@ -326,6 +351,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         stream: chatRequest.stream ?? false,
         temperature: chatRequest.temperature,
         maxTokens: chatRequest.max_tokens,
+        tools: chatRequest.tools,
+        tool_choice: chatRequest.tool_choice,
         metadata: {
           agentId,
           sessionId,
@@ -431,6 +458,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         const promptTokens = chunkUsage?.promptTokens ?? chatRequest.messages.reduce((sum, m) => sum + estimateTokens(normalizeContent(m.content)), 0);
         const completionTokens = chunkUsage?.completionTokens ?? estimateTokens(fullContent);
 
+        const duration = Date.now() - startTime;
+
         const response: ChatCompletionResponse = {
           id: `chatcmpl-${uuidv7()}`,
           object: 'chat.completion',
@@ -451,9 +480,18 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
             completion_tokens: completionTokens,
             total_tokens: promptTokens + completionTokens,
           },
+          pearl: {
+            routing: {
+              selectedModel: model,
+              requestedModel: chatRequest.model,
+            },
+            performance: {
+              totalTime: formatDuration(duration),
+              totalTimeMs: duration,
+            },
+          },
         };
 
-        const duration = Date.now() - startTime;
         logger.info('Chat completion response', {
           agent_id: agentId,
           duration_ms: duration,

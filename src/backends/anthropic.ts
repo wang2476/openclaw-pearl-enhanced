@@ -364,6 +364,8 @@ export class AnthropicClient implements BackendClient {
     if (system) params.system = system;
     if (originalRequest.temperature !== undefined) params.temperature = originalRequest.temperature;
     if (originalRequest.topP !== undefined) params.top_p = originalRequest.topP;
+    if (originalRequest.tools) params.tools = originalRequest.tools;
+    if (originalRequest.tool_choice) params.tool_choice = originalRequest.tool_choice;
 
     const stream = this.client.messages.stream(params);
     let messageId = '';
@@ -424,6 +426,8 @@ export class AnthropicClient implements BackendClient {
     if (system) params.system = system;
     if (originalRequest.temperature !== undefined) params.temperature = originalRequest.temperature;
     if (originalRequest.topP !== undefined) params.top_p = originalRequest.topP;
+    if (originalRequest.tools) params.tools = originalRequest.tools;
+    if (originalRequest.tool_choice) params.tool_choice = originalRequest.tool_choice;
 
     const response = await this.client.messages.create(params);
 
