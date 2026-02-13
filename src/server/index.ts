@@ -100,6 +100,15 @@ interface ChatCompletionRequest {
   };
 }
 
+interface OpenAIToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
 interface ChatCompletionResponse {
   id: string;
   object: 'chat.completion';
@@ -109,9 +118,10 @@ interface ChatCompletionResponse {
     index: number;
     message: {
       role: 'assistant';
-      content: string;
+      content: string | null;
+      tool_calls?: OpenAIToolCall[];
     };
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
   usage: {
     prompt_tokens: number;
@@ -395,6 +405,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
               delta: {
                 role: c.delta?.role,
                 content: c.delta?.content,
+                ...(c.delta?.tool_calls ? { tool_calls: c.delta.tool_calls } : {}),
               },
               finish_reason: c.finishReason,
             })) ?? [],
@@ -437,18 +448,26 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         // Non-streaming response - collect all chunks
         let fullContent = '';
         let model = chatRequest.model;
-        let finishReason: 'stop' | 'length' | null = null;
+        let finishReason: 'stop' | 'length' | 'tool_calls' | null = null;
         let chunkUsage: any = null;
+        let collectedToolCalls: OpenAIToolCall[] = [];
 
         for await (const chunk of pearl.chatCompletion(pearlRequest)) {
           if (chunk.choices?.[0]?.delta?.content) {
             fullContent += chunk.choices[0].delta.content;
           }
+          if (chunk.choices?.[0]?.delta?.tool_calls) {
+            collectedToolCalls.push(...chunk.choices[0].delta.tool_calls.map(tc => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: { name: tc.function.name, arguments: tc.function.arguments },
+            })));
+          }
           if (chunk.model) {
             model = chunk.model;
           }
           if (chunk.choices?.[0]?.finishReason) {
-            finishReason = chunk.choices[0].finishReason as 'stop' | 'length';
+            finishReason = chunk.choices[0].finishReason as 'stop' | 'length' | 'tool_calls';
           }
           if (chunk.usage) {
             chunkUsage = chunk.usage;
@@ -460,6 +479,8 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
 
         const duration = Date.now() - startTime;
 
+        const hasToolCalls = collectedToolCalls.length > 0;
+
         const response: ChatCompletionResponse = {
           id: `chatcmpl-${uuidv7()}`,
           object: 'chat.completion',
@@ -470,9 +491,10 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
               index: 0,
               message: {
                 role: 'assistant',
-                content: fullContent,
+                content: hasToolCalls ? (fullContent || null) : fullContent,
+                ...(hasToolCalls ? { tool_calls: collectedToolCalls } : {}),
               },
-              finish_reason: finishReason ?? 'stop',
+              finish_reason: hasToolCalls ? 'tool_calls' : (finishReason ?? 'stop'),
             },
           ],
           usage: {

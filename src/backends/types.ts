@@ -24,6 +24,15 @@ export interface ChatRequest {
   };
 }
 
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
 export interface ChatChunk {
   id: string;
   object: string;
@@ -34,8 +43,9 @@ export interface ChatChunk {
     delta: {
       role?: string;
       content?: string;
+      tool_calls?: ToolCall[];
     };
-    finishReason?: 'stop' | 'length' | 'content_filter' | null;
+    finishReason?: 'stop' | 'length' | 'content_filter' | 'tool_calls' | null;
   }>;
   usage?: TokenUsage;
 }

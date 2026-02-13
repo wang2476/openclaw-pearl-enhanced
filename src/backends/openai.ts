@@ -34,6 +34,17 @@ interface OpenAIRequest {
   frequency_penalty?: number;
   presence_penalty?: number;
   user?: string;
+  tools?: unknown[];
+  tool_choice?: unknown;
+}
+
+interface OpenAIToolCallChunk {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
 }
 
 interface OpenAIStreamChunk {
@@ -46,6 +57,7 @@ interface OpenAIStreamChunk {
     delta: {
       role?: string;
       content?: string;
+      tool_calls?: OpenAIToolCallChunk[];
     };
     finish_reason?: string | null;
   }>;
@@ -66,6 +78,7 @@ interface OpenAIResponse {
     message: {
       role: string;
       content: string;
+      tool_calls?: OpenAIToolCallChunk[];
     };
     finish_reason: string;
   }>;
@@ -211,6 +224,7 @@ export class OpenAIClient implements BackendClient {
     };
 
     const content = data.choices[0]?.message?.content || '';
+    const toolCalls = data.choices[0]?.message?.tool_calls;
 
     const chunk: ChatChunk = {
       id: data.id,
@@ -221,7 +235,8 @@ export class OpenAIClient implements BackendClient {
         index: 0,
         delta: {
           role: 'assistant',
-          content: content
+          content: content || undefined,
+          ...(toolCalls ? { tool_calls: toolCalls } : {}),
         },
         finishReason: this.mapFinishReason(data.choices[0]?.finish_reason)
       }],
@@ -290,6 +305,14 @@ export class OpenAIClient implements BackendClient {
     // Add user ID if provided in metadata
     if (request.metadata?.agentId) {
       openaiRequest.user = request.metadata.agentId;
+    }
+
+    // Forward tools and tool_choice (already in OpenAI format)
+    if (request.tools) {
+      openaiRequest.tools = request.tools;
+    }
+    if (request.tool_choice) {
+      openaiRequest.tool_choice = request.tool_choice;
     }
 
     return openaiRequest;

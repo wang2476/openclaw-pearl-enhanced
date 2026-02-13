@@ -9,14 +9,15 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { 
-  BackendClient, 
-  ChatRequest, 
-  ChatChunk, 
-  Model, 
+import type {
+  BackendClient,
+  ChatRequest,
+  ChatChunk,
+  Model,
   BackendConfig,
   ErrorRetryOptions,
-  TokenUsage
+  TokenUsage,
+  ToolCall
 } from './types.js';
 import { 
   BackendError, 
@@ -28,6 +29,48 @@ import {
   exponentialBackoff,
   normalizeMessages
 } from './types.js';
+
+/**
+ * Convert OpenAI-format tools to Anthropic-format tools.
+ * OpenAI: { type: "function", function: { name, description, parameters } }
+ * Anthropic: { name, description, input_schema }
+ */
+function convertToolsToAnthropic(tools: unknown[]): Anthropic.Tool[] {
+  return tools.map((tool: any) => {
+    if (tool.type === 'function' && tool.function) {
+      return {
+        name: tool.function.name,
+        description: tool.function.description || '',
+        input_schema: tool.function.parameters || { type: 'object', properties: {} },
+      };
+    }
+    // Already in Anthropic format or unknown — pass through
+    return tool;
+  });
+}
+
+/**
+ * Convert OpenAI-format tool_choice to Anthropic-format.
+ * OpenAI: "auto" | "none" | "required" | { type: "function", function: { name } }
+ * Anthropic: { type: "auto" } | { type: "any" } | { type: "tool", name: "..." }
+ */
+function convertToolChoiceToAnthropic(toolChoice: unknown): Anthropic.MessageCreateParams['tool_choice'] {
+  if (typeof toolChoice === 'string') {
+    if (toolChoice === 'auto') return { type: 'auto' };
+    if (toolChoice === 'none') return { type: 'auto' }; // Anthropic has no "none" — auto is closest
+    if (toolChoice === 'required') return { type: 'any' };
+    return { type: 'auto' };
+  }
+  if (typeof toolChoice === 'object' && toolChoice !== null) {
+    const tc = toolChoice as any;
+    if (tc.type === 'function' && tc.function?.name) {
+      return { type: 'tool', name: tc.function.name };
+    }
+    // Already Anthropic format
+    if (tc.type === 'auto' || tc.type === 'any' || tc.type === 'tool') return tc;
+  }
+  return { type: 'auto' };
+}
 
 // OAuth configuration - use your own legitimate OAuth credentials
 const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
@@ -364,33 +407,63 @@ export class AnthropicClient implements BackendClient {
     if (system) params.system = system;
     if (originalRequest.temperature !== undefined) params.temperature = originalRequest.temperature;
     if (originalRequest.topP !== undefined) params.top_p = originalRequest.topP;
-    if (originalRequest.tools) params.tools = originalRequest.tools;
-    if (originalRequest.tool_choice) params.tool_choice = originalRequest.tool_choice;
+    if (originalRequest.tools) params.tools = convertToolsToAnthropic(originalRequest.tools);
+    if (originalRequest.tool_choice) params.tool_choice = convertToolChoiceToAnthropic(originalRequest.tool_choice);
 
     const stream = this.client.messages.stream(params);
     let messageId = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    let stopReason: string | null = null;
+
+    // Track tool_use blocks being built during streaming
+    let currentToolBlock: { id: string; name: string; inputJson: string } | null = null;
+    const toolCalls: ToolCall[] = [];
 
     for await (const event of stream) {
       if (event.type === 'message_start') {
         messageId = event.message.id;
         inputTokens = event.message.usage.input_tokens;
-      } else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        yield {
-          id: messageId || generateRequestId(),
-          object: 'chat.completion.chunk',
-          created: createTimestamp(),
-          model: originalRequest.model,
-          choices: [{
-            index: 0,
-            delta: { role: 'assistant', content: event.delta.text },
-            finishReason: null
-          }]
-        };
+      } else if (event.type === 'content_block_start') {
+        const block = (event as any).content_block;
+        if (block?.type === 'tool_use') {
+          currentToolBlock = { id: block.id, name: block.name, inputJson: '' };
+        }
+      } else if (event.type === 'content_block_delta') {
+        if (event.delta.type === 'text_delta') {
+          yield {
+            id: messageId || generateRequestId(),
+            object: 'chat.completion.chunk',
+            created: createTimestamp(),
+            model: originalRequest.model,
+            choices: [{
+              index: 0,
+              delta: { role: 'assistant', content: event.delta.text },
+              finishReason: null
+            }]
+          };
+        } else if (event.delta.type === 'input_json_delta' && currentToolBlock) {
+          currentToolBlock.inputJson += (event.delta as any).partial_json ?? '';
+        }
+      } else if (event.type === 'content_block_stop') {
+        if (currentToolBlock) {
+          toolCalls.push({
+            id: currentToolBlock.id,
+            type: 'function',
+            function: {
+              name: currentToolBlock.name,
+              arguments: currentToolBlock.inputJson || '{}',
+            },
+          });
+          currentToolBlock = null;
+        }
       } else if (event.type === 'message_delta') {
         outputTokens = event.usage.output_tokens;
+        stopReason = (event as any).delta?.stop_reason ?? null;
       } else if (event.type === 'message_stop') {
+        const hasToolCalls = toolCalls.length > 0;
+        const finishReason = hasToolCalls ? 'tool_calls' : (stopReason === 'end_turn' ? 'stop' : 'stop');
+
         yield {
           id: messageId || generateRequestId(),
           object: 'chat.completion.chunk',
@@ -398,8 +471,8 @@ export class AnthropicClient implements BackendClient {
           model: originalRequest.model,
           choices: [{
             index: 0,
-            delta: {},
-            finishReason: 'stop'
+            delta: hasToolCalls ? { tool_calls: toolCalls } : {},
+            finishReason: finishReason as any
           }],
           usage: {
             promptTokens: inputTokens,
@@ -426,8 +499,8 @@ export class AnthropicClient implements BackendClient {
     if (system) params.system = system;
     if (originalRequest.temperature !== undefined) params.temperature = originalRequest.temperature;
     if (originalRequest.topP !== undefined) params.top_p = originalRequest.topP;
-    if (originalRequest.tools) params.tools = originalRequest.tools;
-    if (originalRequest.tool_choice) params.tool_choice = originalRequest.tool_choice;
+    if (originalRequest.tools) params.tools = convertToolsToAnthropic(originalRequest.tools);
+    if (originalRequest.tool_choice) params.tool_choice = convertToolChoiceToAnthropic(originalRequest.tool_choice);
 
     const response = await this.client.messages.create(params);
 
@@ -436,6 +509,20 @@ export class AnthropicClient implements BackendClient {
       .map(block => block.text)
       .join('');
 
+    // Extract tool_use blocks and convert to OpenAI tool_calls format
+    const toolCalls: ToolCall[] = response.content
+      .filter((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use')
+      .map(block => ({
+        id: block.id,
+        type: 'function' as const,
+        function: {
+          name: block.name,
+          arguments: JSON.stringify(block.input),
+        },
+      }));
+
+    const hasToolCalls = toolCalls.length > 0;
+
     yield {
       id: response.id || generateRequestId(),
       object: 'chat.completion.chunk',
@@ -443,8 +530,12 @@ export class AnthropicClient implements BackendClient {
       model: originalRequest.model,
       choices: [{
         index: 0,
-        delta: { role: 'assistant', content },
-        finishReason: 'stop'
+        delta: {
+          role: 'assistant',
+          content: content || undefined,
+          ...(hasToolCalls ? { tool_calls: toolCalls } : {}),
+        },
+        finishReason: hasToolCalls ? 'tool_calls' : 'stop'
       }],
       usage: {
         promptTokens: response.usage.input_tokens,
