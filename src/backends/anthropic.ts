@@ -1,10 +1,11 @@
 /**
  * Anthropic Claude Backend Client
- * Uses official SDK with full Claude Code stealth mode for OAuth tokens.
- * 
- * When using OAuth tokens (sk-ant-oat*), this backend mimics Claude Code's
- * exact authentication flow: headers, beta flags, user-agent, and system
- * prompt format — matching the pi-ai reference implementation.
+ * Supports both API keys and OAuth tokens with legitimate credentials.
+ *
+ * OAuth Configuration:
+ * - Set ANTHROPIC_OAUTH_CLIENT_ID environment variable with your OAuth app's client ID
+ * - Set ANTHROPIC_OAUTH_CLIENT_SECRET environment variable with your OAuth app's client secret
+ * - OAuth tokens (sk-ant-oat*) will use your legitimate application credentials
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -28,13 +29,18 @@ import {
   normalizeMessages
 } from './types.js';
 
-// Claude Code stealth mode constants (from pi-ai reference)
-const CLAUDE_CODE_VERSION = '2.1.2';
-const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
-
-// Token refresh constants
+// OAuth configuration - use your own legitimate OAuth credentials
 const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
-const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+
+// Get OAuth credentials from environment variables
+// You must register your own OAuth application with Anthropic
+function getOAuthClientId(): string | null {
+  return process.env.ANTHROPIC_OAUTH_CLIENT_ID || null;
+}
+
+function getOAuthClientSecret(): string | null {
+  return process.env.ANTHROPIC_OAUTH_CLIENT_SECRET || null;
+}
 
 function isOAuthToken(apiKey: string): boolean {
   return apiKey.includes('sk-ant-oat');
@@ -49,15 +55,22 @@ async function refreshOAuthToken(refreshToken: string): Promise<{
   refreshToken: string;
   expiresAt: number;
 }> {
+  const clientId = getOAuthClientId();
+  const clientSecret = getOAuthClientSecret();
+
+  if (!clientId || !clientSecret) {
+    throw new AuthenticationError('OAuth credentials not configured. Set ANTHROPIC_OAUTH_CLIENT_ID and ANTHROPIC_OAUTH_CLIENT_SECRET environment variables.');
+  }
+
   const response = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`,
     },
     body: JSON.stringify({
       grant_type: 'refresh_token',
-      client_id: CLIENT_ID,
+      client_id: clientId,
+      client_secret: clientSecret,
       refresh_token: refreshToken,
     }),
   });
@@ -249,27 +262,17 @@ export class AnthropicClient implements BackendClient {
   }
 
   /**
-   * Create an Anthropic SDK client with appropriate headers.
-   * OAuth tokens get full Claude Code stealth mode.
+   * Create an Anthropic SDK client with appropriate authentication.
+   * Supports both OAuth tokens and API keys.
    */
   private createClient(token: string): Anthropic {
     if (isOAuthToken(token)) {
-      // Full Claude Code stealth mode
-      const defaultHeaders: Record<string, string> = {
-        'accept': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14',
-        'user-agent': `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`,
-        'x-app': 'cli',
-      };
-
-      console.log('[Anthropic] Creating OAuth client with Claude Code stealth headers');
+      console.log('[Anthropic] Creating OAuth client');
 
       return new Anthropic({
         apiKey: null as any,
         authToken: token,
         baseURL: this.config.baseUrl,
-        defaultHeaders,
         dangerouslyAllowBrowser: true,
         timeout: this.config.timeout,
         maxRetries: this.config.retries,
@@ -493,28 +496,19 @@ export class AnthropicClient implements BackendClient {
       }
     }
 
-    // For OAuth tokens, use Claude Code system prompt format:
-    // Array of content blocks with cache_control (matching pi-ai exactly)
+    // System prompt handling
+    // Use cache_control for OAuth tokens to optimize performance
     let system: string | Anthropic.TextBlockParam[] | undefined;
-    
-    if (this.isOAuth) {
-      const blocks: any[] = [
+
+    if (this.isOAuth && systemText) {
+      // Use cache_control for better performance with OAuth
+      system = [
         {
-          type: 'text',
-          text: CLAUDE_CODE_IDENTITY,
-          cache_control: { type: 'ephemeral' },
-        },
-      ];
-      
-      if (systemText) {
-        blocks.push({
           type: 'text',
           text: systemText,
           cache_control: { type: 'ephemeral' },
-        });
-      }
-      
-      system = blocks;
+        },
+      ];
     } else {
       system = systemText;
     }
