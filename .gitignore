@@ -7,11 +7,17 @@ dist/
 # Data
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 memories/
 
 # Environment
 .env
 .env.local
+
+# Configuration with secrets
+pearl.yaml
+pearl-test.yaml
 
 # IDE
 .idea/

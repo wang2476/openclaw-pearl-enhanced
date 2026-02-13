@@ -1,66 +1,112 @@
-# Example Pearl Configuration
-# Copy to pearl.yaml and customize as needed
-
-# Server configuration
 server:
-  port: ${PEARL_PORT:-8080}
-  host: ${PEARL_HOST:-0.0.0.0}
+  port: 8080
+  host: 127.0.0.1  # Changed from 0.0.0.0 for security - binds to localhost only
   cors: true
 
-# Memory storage
 memory:
   store: sqlite
-  path: ~/.pearl/memories.db
+  path: ./pearl-data/memories.db
 
-# Memory extraction settings  
 extraction:
   enabled: true
-  model: ${EXTRACTION_MODEL:-ollama/llama3.2:3b}
+  model: ollama/DeepSeek-R1:8b
   async: true
+  min_confidence: 0.7
   extract_from_assistant: false
+  dedup_window_seconds: 300
 
-# Embedding configuration
 embedding:
   provider: ollama
   model: nomic-embed-text
   dimensions: 768
 
-# Memory retrieval settings
 retrieval:
   max_memories: 10
-  min_similarity: 0.7
+  min_similarity: 0.5
   token_budget: 500
   recency_boost: true
 
-# Model routing configuration
 routing:
-  classifier: ollama/llama3.2:3b
-  default_model: anthropic/claude-sonnet-4-20250514
-  rules:
-    # Route sensitive content to local models
-    - match: { sensitive: true }
-      model: ollama/llama3.1:70b
-    
-    # Route code tasks to Claude Sonnet
-    - match: { type: code }
-      model: anthropic/claude-sonnet-4-20250514
-    
-    # Route simple queries to fast/cheap models
-    - match: { complexity: low }
-      model: anthropic/claude-3-5-haiku-20241022
+  classifier: anthropic/claude-haiku-4-5
+  defaultModel: anthropic/claude-sonnet-4-5
 
-# Backend API configurations
+  # Fallback chains for reliability (ClawRouter-inspired)
+  fallback:
+    ollama/DeepSeek-R1:8b:
+      - anthropic/claude-haiku-4-5
+    ollama/DeepSeek-R1:32B:
+      - anthropic/claude-sonnet-4-5
+      - anthropic/claude-haiku-4-5
+    anthropic/claude-sonnet-4-5:
+      - anthropic/claude-haiku-4-5
+      - ollama/DeepSeek-R1:8b
+    anthropic/claude-haiku-4-5:
+      - ollama/DeepSeek-R1:8b
+
+  rules:
+    # Priority 7: Large context (>100k tokens) - route to Sonnet for quality
+    - name: large-context-to-sonnet
+      match:
+        estimatedTokens: ">100000"
+      model: anthropic/claude-sonnet-4-5
+      priority: 7
+
+    # Priority 6: Complex reasoning/analysis - route to DeepSeek-R1
+    - name: reasoning-to-deepseek
+      match:
+        type: analysis
+        complexity: high
+      model: ollama/DeepSeek-R1:32B
+      priority: 6
+
+    # Priority 5: Sensitive data - always local
+    - name: sensitive-to-local
+      match:
+        sensitive: true
+      model: ollama/DeepSeek-R1:8b
+      priority: 5
+
+    # Priority 4: Short simple queries - local Ollama
+    - name: short-to-ollama
+      match:
+        complexity: low
+        estimatedTokens: "<500"
+      model: ollama/DeepSeek-R1:8b
+      priority: 4
+
+    # Priority 3: Code tasks - Sonnet for quality
+    - name: code-to-sonnet
+      match:
+        type: code
+      model: anthropic/claude-sonnet-4-5
+      priority: 3
+
+    # Priority 2: Medium complexity - Haiku for balance
+    - name: medium-to-haiku
+      match:
+        complexity: medium
+      model: anthropic/claude-haiku-4-5
+      priority: 2
+
+    # Priority 1: Default fallback
+    - name: default
+      match:
+        default: true
+      model: anthropic/claude-sonnet-4-5
+      priority: 1
+
 backends:
   anthropic:
+    # SECURITY: Use environment variables for API keys
+    # Set these before running: export ANTHROPIC_API_KEY=sk-ant-...
     api_key: ${ANTHROPIC_API_KEY}
-  
   openai:
+    # SECURITY: Use environment variables for API keys
+    # Set these before running: export OPENAI_API_KEY=sk-proj-...
     api_key: ${OPENAI_API_KEY}
-  
   ollama:
     base_url: http://localhost:11434
 
-# Logging configuration
 logging:
   level: info
-  file: ~/.pearl/pearl.log
+  file: ./pearl-data/pearl.log
