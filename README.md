@@ -211,10 +211,116 @@ npm start
 # Or run in development mode
 npm run dev
 
-# Configure OpenClaw to use Pearl as model
-# In your openclaw config:
-# model: "http://localhost:8080/v1"
+# Configure OpenClaw to use Pearl
+# See "OpenClaw Integration" section below
 ```
+
+## Port Configuration
+
+Pearl defaults to port **8080**. If this port is already in use (common with signal-cli, Jenkins, or other services), change it in `pearl.yaml`:
+
+```yaml
+server:
+  port: 8081  # Or any available port
+  host: 127.0.0.1
+```
+
+**Common port conflicts:**
+- **signal-cli** (Signal messaging daemon) - Uses port 8080 by default
+- **Jenkins** - Uses port 8080 by default
+- **Tomcat** - Uses port 8080 by default
+
+**Check if port 8080 is in use:**
+```bash
+lsof -i :8080 | grep LISTEN
+```
+
+**Find what's using the port:**
+```bash
+lsof -i :8080 | grep LISTEN | awk '{print $1, $2}'
+```
+
+After changing the port, update your OpenClaw configuration to match (see OpenClaw Integration section below).
+
+## OpenClaw Integration
+
+Pearl can be used as OpenClaw's primary model for intelligent routing. Follow these steps:
+
+### 1. Start Pearl Server
+
+```bash
+cd openclaw-pearl
+npm start
+```
+
+Verify Pearl is running:
+```bash
+curl http://localhost:8081/health
+# Should return: {"status":"healthy","pearl_initialized":true}
+```
+
+### 2. Configure OpenClaw
+
+Edit `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "models": {
+    "providers": {
+      "pearl": {
+        "baseUrl": "http://127.0.0.1:8081/v1",
+        "apiKey": "dummy",
+        "api": "openai-completions",
+        "authHeader": true,
+        "models": [
+          {
+            "id": "auto",
+            "name": "Pearl Auto",
+            "reasoning": false,
+            "input": ["text"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "pearl/auto",
+        "fallbacks": [
+          "anthropic/claude-sonnet-4-5",
+          "openai/gpt-4o"
+        ]
+      },
+      "models": {
+        "pearl/auto": {
+          "alias": "pearl"
+        }
+      }
+    }
+  }
+}
+```
+
+**Important:** If you changed Pearl's port from 8080, update the `baseUrl` to match (e.g., `http://127.0.0.1:8081/v1`).
+
+### 3. Verify Integration
+
+Check OpenClaw config:
+```bash
+openclaw config
+# Should show: model: pearl/auto
+```
+
+Now all OpenClaw requests will flow through Pearl's intelligent routing!
 
 ## Quick Examples
 
@@ -617,7 +723,18 @@ Pearl's intelligent routing saves substantial costs:
 
 ## Troubleshooting
 
-### Common Issues
+For comprehensive troubleshooting, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+### Quick Fixes
+
+**Port Already in Use (EADDRINUSE)**
+Port 8080 is commonly used by signal-cli, Jenkins, or Tomcat. Change Pearl's port:
+```yaml
+# pearl.yaml
+server:
+  port: 8081  # Or any available port
+```
+Then update OpenClaw's baseUrl to match. See [Port Configuration](#port-configuration) above.
 
 **"Unauthorized" / 401 Error**
 - Ensure `PEARL_API_KEY` is set: `export PEARL_API_KEY="your-key"`
