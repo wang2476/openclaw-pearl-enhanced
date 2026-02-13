@@ -705,11 +705,65 @@ See [GitHub Issues](https://github.com/samhotchkiss/openclaw-pearl/issues) for p
 
 To contribute features back to the original Pearl, see [samhotchkiss/openclaw-pearl](https://github.com/samhotchkiss/openclaw-pearl).
 
+## Roadmap
+
+### In Progress (v0.2.0)
+- [ ] Usage statistics endpoint (`/v1/stats`)
+- [ ] Cost tracking dashboard
+- [ ] WebSocket support for streaming
+
+### Planned (v0.3.0)
+- [ ] **Advanced Security**
+  - [ ] IP allowlisting/blocklisting
+  - [ ] HMAC request signing
+  - [ ] Audit log export
+- [ ] **Enhanced Memory**
+  - [ ] Memory expiration policies
+  - [ ] Cross-session memory sharing
+  - [ ] Memory importance ranking
+- [ ] **Routing Improvements**
+  - [ ] Custom classifier models
+  - [ ] Request cost prediction
+  - [ ] Latency-based routing
+- [ ] **Observability**
+  - [ ] Prometheus metrics
+  - [ ] OpenTelemetry tracing
+  - [ ] Grafana dashboards
+
+### Future Considerations (v0.4.0+)
+- [ ] Distributed caching (Redis)
+- [ ] Multi-region support
+- [ ] Load balancing across instances
+- [ ] GraphQL API
+- [ ] Web UI for configuration
+- [ ] Plugin system for custom extractors
+
+See [GitHub Issues](https://github.com/samhotchkiss/openclaw-pearl/issues) for detailed feature requests.
+
 ## License
 
 MIT License
 
-Copyright (c) 2026 Sam Hotchkiss (original author)
-Copyright (c) 2026 wang2476 (enhancements)
+**Original Work:**
+Copyright (c) 2026 [Sam Hotchkiss](https://github.com/samhotchkiss)
 
-See [LICENSE](LICENSE) file for details.
+**Enhancements:**
+Copyright (c) 2026 Contributors
+
+This is an enhanced fork of [openclaw-pearl](https://github.com/samhotchkiss/openclaw-pearl) with additional security, routing, and account management features.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+See [LICENSE](LICENSE) file for complete details.
+
+## Acknowledgments
+
+- **[Sam Hotchkiss](https://github.com/samhotchkiss)** - Original Pearl architecture and implementation
+- **[OpenClaw](https://github.com/claw-sh/openclaw)** - Inspiration for agent architecture
+- **Anthropic** - Claude API and model capabilities
+- **Ollama** - Local model serving infrastructure
+- All contributors who have helped improve Pearl
