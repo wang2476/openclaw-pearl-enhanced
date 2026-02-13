@@ -25,6 +25,44 @@ export class AuthMiddleware {
       console.warn('[Auth] Authentication is enabled but no API key configured');
     }
   }
+
+  private getHeaderValue(value: string | string[] | undefined): string | undefined {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const trimmed = entry.trim();
+        if (trimmed.length > 0) return trimmed;
+      }
+      return undefined;
+    }
+
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  /**
+   * Resolve API key from either configured header, x-api-key, or Authorization bearer token.
+   */
+  private resolveProvidedKey(request: FastifyRequest): string | undefined {
+    const configuredHeader = this.config.headerName?.toLowerCase() ?? 'x-api-key';
+
+    const fromConfigured = this.getHeaderValue(request.headers[configuredHeader]);
+    if (fromConfigured) return fromConfigured;
+
+    if (configuredHeader !== 'x-api-key') {
+      const fromDefault = this.getHeaderValue(request.headers['x-api-key']);
+      if (fromDefault) return fromDefault;
+    }
+
+    const authorization = this.getHeaderValue(request.headers.authorization);
+    if (!authorization) return undefined;
+
+    const bearerPrefix = 'bearer ';
+    if (!authorization.toLowerCase().startsWith(bearerPrefix)) return undefined;
+
+    const token = authorization.slice(bearerPrefix.length).trim();
+    return token.length > 0 ? token : undefined;
+  }
   
   /**
    * Fastify pre-handler hook for authentication
@@ -53,9 +91,8 @@ export class AuthMiddleware {
       return;
     }
     
-    // Extract API key from header
-    const headerName = this.config.headerName!;
-    const providedKey = request.headers[headerName] as string | undefined;
+    // Accept either API-key header (default x-api-key) or Authorization bearer.
+    const providedKey = this.resolveProvidedKey(request);
     
     if (!providedKey) {
       reply.status(401).send({
