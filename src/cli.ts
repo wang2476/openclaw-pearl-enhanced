@@ -5,6 +5,8 @@
  */
 
 import { Command } from 'commander';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { serveCommand } from './cli/serve.js';
 import { memoryCommand } from './cli/memory.js';
 import { statsCommand } from './cli/stats.js';
@@ -25,9 +27,20 @@ program.addCommand(statsCommand);
 program.addCommand(authCommand);
 program.addCommand(watchCommand);
 
-// Only parse if this is the main module (not imported for testing)
-// Check if running as CLI (not being imported)
-const isMainModule = process.argv[1]?.endsWith('cli.js') || process.argv[1]?.endsWith('cli.ts');
+// Parse only when this file is the executable entrypoint.
+// This works for direct execution and symlinked binaries (e.g. npm link).
+const isMainModule = (() => {
+  const argvPath = process.argv[1];
+  if (!argvPath) return false;
+
+  const currentPath = __filename;
+  try {
+    return realpathSync(argvPath) === realpathSync(currentPath);
+  } catch {
+    return resolve(argvPath) === resolve(currentPath);
+  }
+})();
+
 if (isMainModule) {
   program.parse();
 }

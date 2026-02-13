@@ -40,8 +40,16 @@ export class AuthMiddleware {
       return;
     }
     
-    // If no API key is configured, allow all requests with a warning
+    // Fail closed when auth is enabled but API key is missing.
+    // This prevents accidental unauthenticated exposure from misconfiguration.
     if (!this.config.apiKey) {
+      reply.status(503).send({
+        error: {
+          message: 'Authentication is enabled but server API key is not configured',
+          type: 'configuration_error',
+          code: 'missing_server_api_key'
+        }
+      });
       return;
     }
     
