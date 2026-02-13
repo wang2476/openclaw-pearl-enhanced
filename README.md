@@ -8,11 +8,25 @@ Pearl is a model proxy that sits between OpenClaw and LLM providers. It intercep
 
 ## ✨ Enhancements in This Fork
 
-- **🔐 Security Hardening**: Environment variable configuration, localhost-only binding, clean git history
-- **⚖️ Weighted Classifier**: ClawRouter-style weighted scoring for more accurate request classification
+### Security & Authentication
+- **🔐 API Key Authentication**: Secure endpoint access with API key validation
+- **🛡️ Prompt Injection Detection**: Multi-layered detection (regex, heuristic, LLM-based) with configurable actions
+- **🌐 Multi-Language Security**: Protection against attacks in English, Korean, Japanese, and Chinese
+- **⚡ Rate Limiting**: Per-user request throttling with escalation and ban policies
+- **🔒 Response Filtering**: Automatic redaction of sensitive data in responses
+- **🔑 OAuth2 Support**: Enterprise-grade Claude API authentication with token management
+
+### Routing & Intelligence
+- **⚖️ Weighted Classifier**: 15-dimensional scoring for accurate request classification
 - **🧪 A/B Testing Framework**: Compare heuristic vs. weighted classifiers with detailed metrics
-- **📊 Enhanced Routing**: Priority-based rules, fallback chains, token-aware routing
-- **📚 Comprehensive Documentation**: Detailed guides for routing, A/B testing, and integration
+- **📊 Priority-Based Routing**: 7-tier routing rules with fallback chains
+- **💰 Multi-Account Management**: Intelligent routing across multiple API accounts with budget tracking
+- **🌅 Sunrise Session Recovery**: Automatic context restoration after conversation gaps
+
+### Infrastructure
+- **🌐 Localhost-Only Binding**: Security-first configuration for production deployment
+- **📚 Comprehensive Documentation**: Detailed guides for all features
+- **🧹 Clean Git History**: Secure credential management with environment variables
 
 All enhancements maintain full compatibility with the original Pearl API.
 
@@ -78,11 +92,24 @@ Pearl exposes an **OpenAI-compatible API**, so OpenClaw treats it like any other
 ## Quick Start
 
 ```bash
-# Install
-npm install -g openclaw-pearl
+# Clone and install
+git clone https://github.com/samhotchkiss/openclaw-pearl
+cd openclaw-pearl
+npm install
+
+# Set up environment variables
+export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"
+export PEARL_API_KEY="your-secure-api-key"  # For authentication
+
+# Build the project
+npm run build
 
 # Start Pearl server
-pearl serve --port 8080
+npm start
+
+# Or run in development mode
+npm run dev
 
 # Configure OpenClaw to use Pearl as model
 # In your openclaw config:

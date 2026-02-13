@@ -157,7 +157,7 @@ export class AnthropicClient implements BackendClient {
         }
         this.refreshToken = oauth.refreshToken || null;
         this.tokenExpiresAt = oauth.expiresAt || 0;
-        console.log(`[Anthropic] Loaded credentials from ${this.credentialsFilePath} (token: ${this.currentToken.slice(0, 20)}...)`);
+        console.log(`[Anthropic] Loaded credentials from ${this.credentialsFilePath}`);
       }
     } catch (err) {
       console.warn(`[Anthropic] Could not load ${this.credentialsFilePath}, using config token`);

@@ -485,11 +485,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         stack: error instanceof Error ? error.stack : undefined,
         agent_id: agentId,
       });
-      
+
       return reply.status(500).send({
         error: {
           type: 'internal_error',
-          message: error instanceof Error ? error.message : 'An error occurred during chat completion',
+          message: 'An error occurred during chat completion',
         },
       } satisfies ErrorResponse);
     }

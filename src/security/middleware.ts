@@ -124,17 +124,18 @@ export class SecurityMiddleware {
   }
 
   private setupEmergencyBypasses(): void {
-    // Setup test emergency bypass tokens
-    this.addEmergencyBypass('valid_token', {
-      description: 'Test emergency bypass token',
-      validUntil: Date.now() + (24 * 60 * 60 * 1000), // 24 hours
-      allowedUsers: undefined, // Allow any user
-      maxUses: 10,
-      usageCount: 0,
-      createdBy: 'system'
-    });
-    
-    // TODO: Load additional emergency bypasses from secure storage in production
+    // Load emergency bypasses from secure storage in production
+    // SECURITY: Never commit hardcoded bypass tokens
+    // Emergency bypasses should be managed through secure admin API
+    // or loaded from encrypted configuration
+
+    // Example (for production use with secure storage):
+    // const secureConfig = await loadSecureConfig();
+    // if (secureConfig.emergencyBypasses) {
+    //   for (const bypass of secureConfig.emergencyBypasses) {
+    //     this.addEmergencyBypass(bypass.token, bypass);
+    //   }
+    // }
   }
 
   async processRequest(request: ChatRequest): Promise<SecurityProcessingResult> {

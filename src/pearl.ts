@@ -151,9 +151,8 @@ export class Pearl {
       this.backends = new Map();
 
       console.log('[Pearl] Checking Anthropic backend...');
-      console.log('[Pearl] config.backends.anthropic:', !!this.config.backends.anthropic);
-      console.log('[Pearl] api_key present:', !!this.config.backends.anthropic?.apiKey);
-      console.log('[Pearl] api_key valid:', isValidApiKey(this.config.backends.anthropic?.apiKey));
+      // Debug: Backend configuration status (no sensitive data logged)
+      console.log('[Pearl] Anthropic backend configured:', !!this.config.backends.anthropic);
 
       if (this.config.backends.anthropic && isValidApiKey(this.config.backends.anthropic.apiKey)) {
         try {
@@ -338,7 +337,7 @@ export class Pearl {
    */
   private extractRequestMetadata(request: ChatRequest): RequestMetadata {
     const agentId = request.metadata?.agentId || 'unknown-agent';
-    const sessionId = request.metadata?.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const sessionId = request.metadata?.sessionId || `session_${Date.now()}_${crypto.randomUUID()}`;
 
     return { agentId, sessionId };
   }
