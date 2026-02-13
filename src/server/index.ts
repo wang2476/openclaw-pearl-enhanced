@@ -86,6 +86,65 @@ function formatDuration(ms: number): string {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
+function normalizeSystemPrompt(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function applySystemPromptOverride(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  systemPrompt?: string
+): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+  if (!systemPrompt) return messages;
+
+  const systemIndex = messages.findIndex((message) => message.role === 'system');
+  if (systemIndex >= 0) {
+    const existing = messages[systemIndex].content.trim();
+    const merged = existing.length > 0 ? `${systemPrompt}\n\n${existing}` : systemPrompt;
+    return messages.map((message, index) =>
+      index === systemIndex ? { ...message, content: merged } : message
+    );
+  }
+
+  return [{ role: 'system', content: systemPrompt }, ...messages];
+}
+
+function buildResolvedModelTag(model: string): string {
+  return model ? `[model: ${model}]` : '';
+}
+
+function buildQueryTimeTag(durationMs: number): string {
+  if (!Number.isFinite(durationMs)) return '';
+  const safeMs = Math.max(0, durationMs);
+  const seconds = safeMs / 1000;
+  if (seconds < 60) {
+    const roundedSeconds = Math.round(seconds * 10) / 10;
+    return `[query_time: ${roundedSeconds}s]`;
+  }
+  const minutes = seconds / 60;
+  const roundedMinutes = Math.round(minutes * 10) / 10;
+  return `[query_time: ${roundedMinutes}m]`;
+}
+
+function appendResponseNotes(
+  content: string,
+  opts: { model?: string; durationMs?: number }
+): string {
+  const notes: string[] = [];
+
+  const modelTag = opts.model ? buildResolvedModelTag(opts.model) : '';
+  if (modelTag && !content.includes(modelTag)) notes.push(modelTag);
+
+  const queryTimeTag = typeof opts.durationMs === 'number' ? buildQueryTimeTag(opts.durationMs) : '';
+  if (queryTimeTag && !content.includes(queryTimeTag)) notes.push(queryTimeTag);
+
+  if (notes.length === 0) return content;
+  const noteText = notes.join('\n');
+  if (content.trim().length === 0) return noteText;
+  return `${content}\n\n${noteText}`;
+}
+
 interface ChatCompletionRequest {
   model: string;
   messages: ChatMessage[];
@@ -97,6 +156,7 @@ interface ChatCompletionRequest {
   metadata?: {
     agent_id?: string;
     session_id?: string;
+    system_prompt?: string;
   };
 }
 
@@ -289,6 +349,15 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     });
   });
 
+  // OpenClaw compatibility health check
+  server.get('/api/v1/check', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.send({
+      status: 'ok',
+      service: 'pearl',
+      version: '0.1.0',
+    });
+  });
+
   // List models
   server.get('/v1/models', async (_request: FastifyRequest, reply: FastifyReply) => {
     logger.debug('Models list requested');
@@ -312,6 +381,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     // Get agent ID from header or body
     const headerAgentId = request.headers['x-pearl-agent-id'] as string | undefined;
     const headerSessionId = request.headers['x-pearl-session-id'] as string | undefined;
+    const headerSystemPrompt = request.headers['x-pearl-system-prompt'] as string | undefined;
     
     // Validate request
     const validation = validateChatRequest(request.body);
@@ -329,6 +399,9 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     const { request: chatRequest } = validation;
     const agentId = chatRequest.metadata?.agent_id ?? headerAgentId ?? 'anonymous';
     const sessionId = chatRequest.metadata?.session_id ?? headerSessionId ?? uuidv7();
+    const systemPromptOverride = normalizeSystemPrompt(
+      chatRequest.metadata?.system_prompt ?? headerSystemPrompt
+    );
 
     logger.info('Chat completion request', {
       agent_id: agentId,
@@ -336,6 +409,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       model: chatRequest.model,
       message_count: chatRequest.messages.length,
       stream: chatRequest.stream ?? false,
+      has_system_prompt_override: Boolean(systemPromptOverride),
     });
 
     // If Pearl is not initialized, run in passthrough mode
@@ -351,13 +425,15 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     }
 
     try {
+      const normalizedMessages = chatRequest.messages.map(m => ({
+        role: m.role as 'system' | 'user' | 'assistant',
+        content: normalizeContent(m.content),
+      }));
+
       // Build Pearl ChatRequest — normalize content to strings
       const pearlRequest: ChatRequest = {
         model: chatRequest.model,
-        messages: chatRequest.messages.map(m => ({
-          role: m.role as 'system' | 'user' | 'assistant',
-          content: normalizeContent(m.content),
-        })),
+        messages: applySystemPromptOverride(normalizedMessages, systemPromptOverride),
         stream: chatRequest.stream ?? false,
         temperature: chatRequest.temperature,
         maxTokens: chatRequest.max_tokens,
@@ -383,6 +459,11 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         let streamContent = '';
         let streamModel = chatRequest.model;
         let streamUsage: any = null;
+        let pendingFinishChunk: any = null;
+
+        const writeSseChunk = (chunk: any) => {
+          reply.raw.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        };
 
         for await (const chunk of pearl.chatCompletion(pearlRequest)) {
           if (chunk.choices?.[0]?.delta?.content) {
@@ -410,14 +491,89 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
               finish_reason: c.finishReason,
             })) ?? [],
           };
-          
-          reply.raw.write(`data: ${JSON.stringify(sseChunk)}\n\n`);
+
+          const hasFinish = sseChunk.choices.some((c: any) => c.finish_reason !== null && c.finish_reason !== undefined);
+          if (hasFinish) {
+            pendingFinishChunk = sseChunk;
+          } else {
+            writeSseChunk(sseChunk);
+          }
+        }
+
+        const duration = Date.now() - startTime;
+        const streamContentWithNotes = streamContent.trim().length > 0
+          ? appendResponseNotes(streamContent, {
+              model: streamModel,
+              durationMs: duration,
+            })
+          : streamContent;
+        const notesText = streamContentWithNotes.slice(streamContent.length);
+        if (notesText.length > 0) {
+          streamContent = streamContentWithNotes;
+          const notesChunk = {
+            id: responseId,
+            object: 'chat.completion.chunk',
+            created,
+            model: streamModel,
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  content: notesText,
+                },
+                finish_reason: null,
+              },
+            ],
+          };
+          writeSseChunk(notesChunk);
+        }
+
+        if (pendingFinishChunk) {
+          const finishChunkHasPayload = pendingFinishChunk.choices.some(
+            (choice: any) =>
+              (typeof choice.delta?.content === 'string' && choice.delta.content.length > 0) ||
+              (Array.isArray(choice.delta?.tool_calls) && choice.delta.tool_calls.length > 0),
+          );
+
+          if (finishChunkHasPayload) {
+            const trailingPayloadChunk = {
+              ...pendingFinishChunk,
+              choices: pendingFinishChunk.choices.map((choice: any) => ({
+                ...choice,
+                finish_reason: null,
+              })),
+            };
+            writeSseChunk(trailingPayloadChunk);
+          }
+
+          const finishChunk = {
+            ...pendingFinishChunk,
+            choices: pendingFinishChunk.choices.map((choice: any) => ({
+              ...choice,
+              delta: {},
+            })),
+          };
+          writeSseChunk(finishChunk);
+        } else {
+          const syntheticFinishChunk = {
+            id: responseId,
+            object: 'chat.completion.chunk',
+            created,
+            model: streamModel,
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: 'stop',
+              },
+            ],
+          };
+          writeSseChunk(syntheticFinishChunk);
         }
 
         reply.raw.write('data: [DONE]\n\n');
         reply.raw.end();
 
-        const duration = Date.now() - startTime;
         logger.info('Streaming chat completion finished', {
           agent_id: agentId,
           duration_ms: duration,
@@ -480,6 +636,12 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         const duration = Date.now() - startTime;
 
         const hasToolCalls = collectedToolCalls.length > 0;
+        const fullContentWithNotes = hasToolCalls
+          ? fullContent
+          : appendResponseNotes(fullContent, {
+              model,
+              durationMs: duration,
+            });
 
         const response: ChatCompletionResponse = {
           id: `chatcmpl-${uuidv7()}`,
@@ -491,7 +653,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
               index: 0,
               message: {
                 role: 'assistant',
-                content: hasToolCalls ? (fullContent || null) : fullContent,
+                content: hasToolCalls ? (fullContentWithNotes || null) : fullContentWithNotes,
                 ...(hasToolCalls ? { tool_calls: collectedToolCalls } : {}),
               },
               finish_reason: hasToolCalls ? 'tool_calls' : (finishReason ?? 'stop'),
@@ -530,7 +692,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
           requestedModel: chatRequest.model,
           routedModel: model,
           prompt: normalizeContent(lastUserMsg?.content ?? '').slice(0, 200),
-          responsePreview: fullContent.slice(0, 200),
+          responsePreview: fullContentWithNotes.slice(0, 200),
           tokens: { input: promptTokens, output: completionTokens, total: promptTokens + completionTokens },
           durationMs: duration,
           stream: false,
