@@ -49,6 +49,13 @@ export interface ServerConfig {
   port: number;
   host: string;
   cors?: boolean;
+  auth?: AuthConfig;
+}
+
+export interface AuthConfig {
+  enabled: boolean;
+  apiKey?: string;
+  headerName?: string;
 }
 
 export interface MemoryConfig {

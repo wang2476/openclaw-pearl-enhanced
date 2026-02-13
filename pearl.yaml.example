@@ -2,6 +2,10 @@ server:
   port: 8080
   host: 127.0.0.1  # Changed from 0.0.0.0 for security - binds to localhost only
   cors: true
+  auth:
+    enabled: false  # Set to true to require API key authentication
+    # api_key: ${PEARL_API_KEY}  # Or set directly (not recommended)
+    # header_name: x-api-key  # Header name for API key (default: x-api-key)
 
 memory:
   store: sqlite

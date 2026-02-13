@@ -9,7 +9,7 @@ import { appendFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { Pearl } from '../pearl.js';
-import { createLogger } from '../utils/logger.js';
+import { AuthMiddleware } from './auth-middleware.js';
 import type { ServerConfig, PearlConfig, ChatRequest } from '../types.js';
 
 // Structured request log for the watch CLI
@@ -210,6 +210,28 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   const server = Fastify({
     logger: false, // We use our own logger
   });
+
+  // Initialize authentication middleware
+  const authConfig = {
+    enabled: options.serverConfig?.auth?.enabled ?? false,
+    apiKey: options.serverConfig?.auth?.apiKey || process.env.PEARL_API_KEY,
+    headerName: options.serverConfig?.auth?.headerName ?? 'x-api-key'
+  };
+
+  const authMiddleware = new AuthMiddleware(authConfig);
+
+  // Add authentication hook (runs before all route handlers)
+  server.addHook('preHandler', async (request, reply) => {
+    await authMiddleware.authenticate(request, reply);
+  });
+
+  if (authConfig.enabled && authConfig.apiKey) {
+    logger.info(`Authentication enabled (using header: ${authConfig.headerName})`);
+  } else if (authConfig.enabled) {
+    logger.warn('Authentication enabled but no API key configured - all requests will be denied');
+  } else {
+    logger.warn('⚠️  Authentication DISABLED - API is publicly accessible!');
+  }
 
   // Health check
   server.get('/health', async (_request: FastifyRequest, reply: FastifyReply) => {
