@@ -730,7 +730,9 @@ export class PromptInjectionDetector {
       heuristic_repetition: 'contains excessive repetition patterns',
       heuristic_caps: 'contains excessive capitalization',
       heuristic_homoglyph: 'uses homoglyph characters for deception',
-      heuristic_encoding: 'uses encoding to hide malicious content'
+      heuristic_encoding: 'uses encoding to hide malicious content',
+      admin_injection: 'attempts admin privilege injection',
+      rate_limit: 'rate limit threshold exceeded'
     };
 
     const threatReasons = threats.map(threat => threatDescriptions[threat]).join(', ');

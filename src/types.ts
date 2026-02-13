@@ -114,6 +114,7 @@ export interface BackendsConfig {
   openai?: ProviderConfig;
   ollama?: OllamaConfig;
   openrouter?: ProviderConfig;
+  mock?: { enabled: boolean };
 }
 
 export interface ProviderConfig {

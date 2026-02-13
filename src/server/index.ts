@@ -601,21 +601,48 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   // DELETE /v1/memories/:id - Delete a memory
   server.delete('/v1/memories/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
-    
+    const requestingAgentId = request.headers['x-pearl-agent-id'] as string | undefined;
+
     try {
       if (!pearl) {
         throw new Error('Pearl instance not available');
       }
+
+      // Authorization: Check agent ownership before deleting
+      if (requestingAgentId) {
+        const memory = await pearl.getMemory(id);
+
+        if (!memory) {
+          return reply.status(404).send({
+            error: 'Memory not found',
+          });
+        }
+
+        // Verify the requesting agent owns this memory
+        if (memory.agent_id !== requestingAgentId) {
+          logger.warn('Unauthorized memory deletion attempt', {
+            memoryId: id,
+            memoryOwner: memory.agent_id,
+            requestingAgent: requestingAgentId
+          });
+          return reply.status(403).send({
+            error: {
+              type: 'forbidden',
+              message: 'You do not have permission to delete this memory',
+              code: 'unauthorized_agent'
+            },
+          });
+        }
+      }
+
       const deleted = await pearl.deleteMemory(id);
-      
+
       if (!deleted) {
         return reply.status(404).send({
-          error: {
-            error: 'Memory not found',
-          },
+          error: 'Memory not found',
         });
       }
-      
+
       return reply.send({
         deleted: true,
         id,

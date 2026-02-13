@@ -648,7 +648,16 @@ export class Pearl {
       createdAt: new Date(memory.created_at).toISOString(),
     };
   }
-  
+
+  async getMemory(memoryId: string): Promise<any | null> {
+    if (!this.memoryStore) {
+      throw new Error('Memory store not initialized');
+    }
+
+    const memory = this.memoryStore.get(memoryId);
+    return memory || null;
+  }
+
   async deleteMemory(memoryId: string): Promise<boolean> {
     if (!this.memoryStore) {
       throw new Error('Memory store not initialized');
