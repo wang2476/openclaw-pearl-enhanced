@@ -223,6 +223,20 @@ describe('Pearl Orchestrator', () => {
       expect(routeRequest).toHaveBeenCalled();
     });
 
+    it('should not fail when routing result has no fallbacks', async () => {
+      mockFlowDependencies(mockChatRequest);
+      const routeRequest = vi.spyOn(pearl as any, 'routeRequest');
+      routeRequest.mockResolvedValue({
+        model: 'test-model',
+        classification: { complexity: 'low', type: 'general', sensitive: false, estimatedTokens: 100, requiresTools: false },
+        rule: 'default',
+      });
+
+      const generator = pearl.chatCompletion(mockChatRequest);
+      const firstChunk = await generator.next();
+      expect(firstChunk.done).toBe(false);
+    });
+
     it('should stream response back from backend', async () => {
       const mockChunks: ChatChunk[] = [
         {

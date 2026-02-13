@@ -286,15 +286,32 @@ export class Pearl {
 
       // 6. Forward to backend and stream response
       let assistantResponse = '';
+      const routedFallbacks = Array.isArray(routing.fallbacks) ? routing.fallbacks : [];
+      const selectedModel = this.resolveAvailableModel(
+        routing.model,
+        routedFallbacks,
+        request.model
+      );
+
+      if (selectedModel !== routing.model) {
+        this.logger.warn('Routed model backend unavailable; selected fallback model', {
+          routedModel: routing.model,
+          selectedModel,
+          requestedModel: request.model,
+          routedFallbacks,
+          availableBackends: Array.from(this.backends.keys()),
+        });
+      }
+
       const modifiedRequest = {
         ...request,
-        model: routing.model,
+        model: selectedModel,
         messages: convertMessagesToBackend(augmentedRequest.messages),
         // Pass routing metadata for logging
         _routing: routing,
       };
 
-      for await (const chunk of this.forwardToBackend(routing.model, modifiedRequest)) {
+      for await (const chunk of this.forwardToBackend(selectedModel, modifiedRequest)) {
         // Collect assistant response content for potential extraction
         if (chunk.choices?.[0]?.delta?.content) {
           assistantResponse += chunk.choices[0].delta.content;
@@ -393,6 +410,44 @@ export class Pearl {
     for await (const chunk of backend.chat(request)) {
       yield chunk;
     }
+  }
+
+  /**
+   * Check whether a model can be served by an initialized backend.
+   */
+  private hasBackendForModel(model: string): boolean {
+    const backendName = this.getBackendFromModel(model);
+    return this.backends.has(backendName);
+  }
+
+  /**
+   * Resolve the best available model if the routed model backend is unavailable.
+   */
+  private resolveAvailableModel(
+    routedModel: string,
+    routedFallbacks: string[] | undefined,
+    requestedModel: string
+  ): string {
+    const fallbackChain = Array.isArray(routedFallbacks) ? routedFallbacks : [];
+
+    const candidates = [
+      routedModel,
+      ...fallbackChain,
+      requestedModel,
+      this.config.routing.defaultModel,
+      this.config.extraction.model,
+      'ollama/DeepSeek-R1:8b',
+      'ollama/llama3.2:3b',
+    ].filter((value): value is string => Boolean(value && value.trim()));
+
+    const seen = new Set<string>();
+    for (const candidate of candidates) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      if (this.hasBackendForModel(candidate)) return candidate;
+    }
+
+    return routedModel;
   }
 
   /**

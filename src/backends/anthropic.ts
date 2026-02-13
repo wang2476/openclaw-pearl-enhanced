@@ -587,8 +587,20 @@ export class AnthropicClient implements BackendClient {
       if (msg.role === 'system') {
         systemText = systemText ? `${systemText}\n\n${msg.content}` : msg.content;
       } else if (msg.role === 'user' || msg.role === 'assistant') {
-        messages.push({ role: msg.role, content: msg.content });
+        // Anthropic rejects assistant messages that end with trailing whitespace.
+        // Normalize assistant content to avoid invalid_request_error on replayed histories.
+        const content = msg.role === 'assistant' ? msg.content.replace(/\s+$/u, '') : msg.content;
+        messages.push({ role: msg.role, content });
       }
+    }
+
+    // If replayed history ends with empty assistant turns after trimming, drop them.
+    while (messages.length > 0) {
+      const last = messages[messages.length - 1] as Anthropic.MessageParam;
+      if (last.role !== 'assistant') break;
+      if (typeof last.content !== 'string') break;
+      if (last.content.trim().length > 0) break;
+      messages.pop();
     }
 
     // System prompt handling

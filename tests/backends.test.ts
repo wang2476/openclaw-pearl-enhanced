@@ -145,6 +145,21 @@ describe('Anthropic Backend Client', () => {
     const isHealthy = await client.health();
     expect(typeof isHealthy).toBe('boolean');
   });
+
+  it('should trim trailing whitespace from assistant messages', () => {
+    const prepared = (client as any).prepareRequest({
+      model: 'anthropic/claude-sonnet-4-5',
+      messages: [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: 'partial answer with trailing spaces   \n\t' },
+      ],
+      stream: false,
+    });
+
+    const last = prepared.messages[prepared.messages.length - 1];
+    expect(last.role).toBe('assistant');
+    expect(last.content).toBe('partial answer with trailing spaces');
+  });
 });
 
 describe('OpenAI Backend Client', () => {

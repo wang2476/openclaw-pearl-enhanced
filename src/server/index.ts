@@ -49,9 +49,10 @@ function logRequest(entry: RequestLogEntry) {
 // Content can be a string or array of content blocks (OpenAI multi-modal format)
 type ContentBlock = { type: 'text'; text: string } | { type: string; [key: string]: unknown };
 type MessageContent = string | ContentBlock[];
+type BackendRole = 'system' | 'user' | 'assistant';
 
 interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: string;
   content: MessageContent;
 }
 
@@ -62,15 +63,44 @@ interface ChatMessage {
  * - An array of content blocks: [{"type":"text","text":"hello"}]
  */
 function normalizeContent(content: MessageContent): string {
+  if (content == null) return '';
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content
+    const textBlocks = content
       .filter((block): block is { type: 'text'; text: string } =>
         block.type === 'text' && typeof (block as any).text === 'string')
-      .map(block => block.text)
-      .join('\n');
+      .map(block => block.text);
+    if (textBlocks.length > 0) return textBlocks.join('\n');
+    try {
+      return JSON.stringify(content);
+    } catch {
+      return String(content);
+    }
   }
-  return String(content ?? '');
+  return String(content);
+}
+
+/**
+ * Normalize non-standard chat roles from OpenAI-compatible clients.
+ * OpenClaw session replay can include roles like "toolResult" or "developer".
+ */
+function normalizeIncomingRole(role: string): BackendRole {
+  const normalized = role.trim().toLowerCase();
+  if (normalized === 'system' || normalized === 'developer') return 'system';
+  if (normalized === 'user') return 'user';
+  if (normalized === 'assistant') return 'assistant';
+
+  // Tool/function history is closest to assistant context for downstream models.
+  if (
+    normalized === 'tool' ||
+    normalized === 'tool_result' ||
+    normalized === 'toolresult' ||
+    normalized === 'function'
+  ) {
+    return 'assistant';
+  }
+
+  return 'assistant';
 }
 
 /**
@@ -263,14 +293,11 @@ function validateChatRequest(body: unknown): { valid: true; request: ChatComplet
 
   for (let i = 0; i < req.messages.length; i++) {
     const msg = req.messages[i] as Record<string, unknown>;
-    if (!msg.role || typeof msg.role !== 'string') {
+    if (!msg.role || typeof msg.role !== 'string' || msg.role.trim().length === 0) {
       return { valid: false, error: `messages[${i}].role is required and must be a string` };
     }
-    if (!['system', 'user', 'assistant'].includes(msg.role as string)) {
-      return { valid: false, error: `messages[${i}].role must be 'system', 'user', or 'assistant'` };
-    }
-    if (typeof msg.content !== 'string' && !Array.isArray(msg.content)) {
-      return { valid: false, error: `messages[${i}].content must be a string or array of content blocks` };
+    if (!Object.prototype.hasOwnProperty.call(msg, 'content')) {
+      return { valid: false, error: `messages[${i}].content is required` };
     }
   }
 
@@ -425,10 +452,22 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
     }
 
     try {
-      const normalizedMessages = chatRequest.messages.map(m => ({
-        role: m.role as 'system' | 'user' | 'assistant',
-        content: normalizeContent(m.content),
-      }));
+      let normalizedRoleCount = 0;
+      const normalizedMessages = chatRequest.messages.map((m) => {
+        const normalizedRole = normalizeIncomingRole(m.role);
+        if (normalizedRole !== m.role) normalizedRoleCount += 1;
+        return {
+          role: normalizedRole,
+          content: normalizeContent(m.content),
+        };
+      });
+
+      if (normalizedRoleCount > 0) {
+        logger.debug('Normalized non-standard message roles', {
+          normalized_count: normalizedRoleCount,
+          total_messages: chatRequest.messages.length,
+        });
+      }
 
       // Build Pearl ChatRequest — normalize content to strings
       const pearlRequest: ChatRequest = {
@@ -707,6 +746,43 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         stack: error instanceof Error ? error.stack : undefined,
         agent_id: agentId,
       });
+
+      // If this was a streaming response and headers are already sent,
+      // close the SSE stream gracefully instead of attempting a JSON error reply.
+      if (chatRequest.stream && reply.raw.headersSent) {
+        try {
+          if (!reply.raw.writableEnded) {
+            const streamErrorChunk = {
+              id: `chatcmpl-${uuidv7()}`,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model: chatRequest.model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {},
+                  finish_reason: 'stop',
+                },
+              ],
+              error: {
+                type: 'internal_error',
+                message: 'An error occurred during chat completion',
+              },
+            };
+            reply.raw.write(`data: ${JSON.stringify(streamErrorChunk)}\n\n`);
+            reply.raw.write('data: [DONE]\n\n');
+            reply.raw.end();
+          }
+        } catch {
+          // Ignore secondary stream close failures.
+        }
+        return;
+      }
+
+      if (reply.raw.headersSent) {
+        if (!reply.raw.writableEnded) reply.raw.end();
+        return;
+      }
 
       return reply.status(500).send({
         error: {

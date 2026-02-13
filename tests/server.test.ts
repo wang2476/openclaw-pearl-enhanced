@@ -213,6 +213,28 @@ describe('Pearl HTTP Server', () => {
       const body = JSON.parse(response.body);
       expect(body.error).toBeDefined();
     });
+
+    it('accepts non-standard replay roles by normalizing them', async () => {
+      const response = await server.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        payload: {
+          model: 'pearl',
+          messages: [
+            { role: 'developer', content: 'You are helpful.' },
+            { role: 'user', content: 'Hi' },
+            { role: 'toolResult', content: [{ type: 'text', text: 'tool output' }] },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(body.choices?.[0]?.message?.role).toBe('assistant');
+    });
   });
 
   describe('GET /v1/models', () => {
