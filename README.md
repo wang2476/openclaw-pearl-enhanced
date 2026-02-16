@@ -6,6 +6,23 @@
 
 Pearl is a model proxy that sits between OpenClaw and LLM providers. It intercepts prompts, extracts memorable content, augments prompts with relevant memories, and routes requests to the optimal model based on cost/speed/quality requirements.
 
+## Changelog
+
+### 2026-02-13
+
+- `4d2dcc9` Fix OpenClaw TUI connection errors
+  - Normalizes non-standard replay roles (for example `developer`, `toolResult`) and content blocks for OpenClaw compatibility.
+  - Sanitizes Anthropic replay payloads (trailing whitespace and empty trailing assistant turns).
+  - Adds backend-aware model fallback selection when routed backends are unavailable.
+  - Improves SSE error handling so streaming responses close gracefully with `[DONE]`.
+  - Adds tests for role normalization, replay sanitization, and routing fallback behavior.
+- `9b56f98` fix(auth): accept bearer token for pearl API key auth
+  - Accepts API keys provided through `Authorization: Bearer <token>` in addition to prior auth paths.
+- `a3057f8` Ensure secure key handling
+- `0bb5a86` fix(server): restore OpenClaw/Pearl response path and prompt override
+- `b35c730` Update deepseek config notes
+- `825167a` Explain model sorting and config
+
 ## ✨ Enhancements in This Fork
 
 ### Security & Authentication
