@@ -562,12 +562,9 @@ export class AnthropicClient implements BackendClient {
 
   async health(): Promise<boolean> {
     try {
-      await this.client.messages.create({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'test' }]
-      });
-      return true;
+      // Use models list endpoint as a free connectivity check instead of a billed messages.create call
+      const models = await this.client.models.list({ limit: 1 });
+      return models.data.length > 0;
     } catch {
       return false;
     }

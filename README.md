@@ -339,6 +339,23 @@ openclaw config
 
 Now all OpenClaw requests will flow through Pearl's intelligent routing!
 
+### 4. Auto-Start Ollama + Pearl with OpenClaw TUI
+
+Use the launcher script to start Ollama and Pearl automatically (if they are not already running), then open OpenClaw TUI:
+
+```bash
+./scripts/openclaw-pearl-tui.sh
+```
+
+Optional overrides:
+
+```bash
+# Use a different local model or Pearl port
+OLLAMA_WARM_MODEL="DeepSeek-R1:8b" PEARL_PORT=8080 ./scripts/openclaw-pearl-tui.sh
+```
+
+Script path: `scripts/openclaw-pearl-tui.sh`
+
 ## Quick Examples
 
 ### Basic Chat Request
