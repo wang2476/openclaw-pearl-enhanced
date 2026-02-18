@@ -62,15 +62,29 @@ interface ChatMessage {
  * - A plain string: "hello"
  * - An array of content blocks: [{"type":"text","text":"hello"}]
  */
+function extractTextFromContentBlock(block: ContentBlock): string | null {
+  const candidateKeys = ['text', 'input_text', 'output_text', 'content'];
+  const asRecord = block as Record<string, unknown>;
+
+  for (const key of candidateKeys) {
+    const value = asRecord[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 function normalizeContent(content: MessageContent): string {
   if (content == null) return '';
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     const textBlocks = content
-      .filter((block): block is { type: 'text'; text: string } =>
-        block.type === 'text' && typeof (block as any).text === 'string')
-      .map(block => block.text);
-    if (textBlocks.length > 0) return textBlocks.join('\n');
+      .map(extractTextFromContentBlock)
+      .filter((text): text is string => typeof text === 'string');
+    // Preserve exact user payload without injecting separators between blocks.
+    if (textBlocks.length > 0) return textBlocks.join('');
     try {
       return JSON.stringify(content);
     } catch {
@@ -78,6 +92,44 @@ function normalizeContent(content: MessageContent): string {
     }
   }
   return String(content);
+}
+
+function normalizeUserEnvelope(content: string): string {
+  let normalized = content.trim();
+  if (!normalized) return normalized;
+
+  // Remove common trailing metadata envelopes emitted by chat bridges.
+  const trailingMetadataLine =
+    /\n+\[(?:(?:message|msg|thread|chat|channel)_id|Slack|Telegram|Discord|Signal|WhatsApp|SMS)\b[^\]]*\]\s*$/i;
+  while (trailingMetadataLine.test(normalized)) {
+    normalized = normalized.replace(trailingMetadataLine, '').trim();
+  }
+
+  // Strip leading bridge metadata, preserving only user content.
+  const prefixedTransportMatch = normalized.match(
+    /^\[(?:Telegram|Slack|Discord|Signal|WhatsApp|SMS)\b[^\]]*\]\s*([\s\S]+)$/i
+  );
+  if (prefixedTransportMatch?.[1]) {
+    normalized = prefixedTransportMatch[1].trim();
+  }
+
+  // Handle wrapped "from X: <message>" envelopes.
+  const fromEnvelopeMatch = normalized.match(
+    /(?:^|\n)(?:System:\s*\[[^\]]+\]\s*)?(?:Slack\s+(?:message|dm)\s+(?:in|from)\s+[^:]+:\s*)?from\s+[^:\n]+:\s*([\s\S]+)$/i
+  );
+  if (fromEnvelopeMatch?.[1]) {
+    return fromEnvelopeMatch[1].trim();
+  }
+
+  // Handle "System: [timestamp] <bridge metadata>: <message>" wrappers.
+  const systemEnvelopeMatch = normalized.match(
+    /^System:\s*\[[^\]]+\]\s*(?:Slack|Telegram|Discord|Signal|WhatsApp|SMS)?[^:\n]*:\s*([\s\S]+)$/i
+  );
+  if (systemEnvelopeMatch?.[1]) {
+    return systemEnvelopeMatch[1].trim();
+  }
+
+  return normalized;
 }
 
 /**
@@ -456,9 +508,13 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
       const normalizedMessages = chatRequest.messages.map((m) => {
         const normalizedRole = normalizeIncomingRole(m.role);
         if (normalizedRole !== m.role) normalizedRoleCount += 1;
+        const normalizedContent = normalizeContent(m.content);
+        const finalContent = normalizedRole === 'user'
+          ? normalizeUserEnvelope(normalizedContent)
+          : normalizedContent;
         return {
           role: normalizedRole,
-          content: normalizeContent(m.content),
+          content: finalContent,
         };
       });
 
@@ -645,18 +701,53 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         let model = chatRequest.model;
         let finishReason: 'stop' | 'length' | 'tool_calls' | null = null;
         let chunkUsage: any = null;
-        let collectedToolCalls: OpenAIToolCall[] = [];
+        type PartialToolCall = {
+          id?: string;
+          name?: string;
+          arguments: string;
+        };
+        const toolCallState = new Map<string, PartialToolCall>();
+        const toolCallOrder: string[] = [];
+        const toolIndexToKey = new Map<string, string>();
 
         for await (const chunk of pearl.chatCompletion(pearlRequest)) {
           if (chunk.choices?.[0]?.delta?.content) {
             fullContent += chunk.choices[0].delta.content;
           }
           if (chunk.choices?.[0]?.delta?.tool_calls) {
-            collectedToolCalls.push(...chunk.choices[0].delta.tool_calls.map(tc => ({
-              id: tc.id,
-              type: 'function' as const,
-              function: { name: tc.function.name, arguments: tc.function.arguments },
-            })));
+            for (const [idx, tc] of chunk.choices[0].delta.tool_calls.entries()) {
+              const typed = tc as unknown as {
+                id?: string;
+                index?: number;
+                function?: {
+                  name?: string;
+                  arguments?: string;
+                };
+              };
+              const indexKey = `idx:${typeof typed.index === 'number' ? typed.index : idx}`;
+              let key = typed.id ?? toolIndexToKey.get(indexKey) ?? indexKey;
+              if (typed.id) {
+                toolIndexToKey.set(indexKey, typed.id);
+                key = typed.id;
+              } else if (!toolIndexToKey.has(indexKey)) {
+                toolIndexToKey.set(indexKey, key);
+              }
+              if (!toolCallState.has(key)) {
+                toolCallState.set(key, { arguments: '' });
+                toolCallOrder.push(key);
+              }
+
+              const state = toolCallState.get(key)!;
+              if (typeof typed.id === 'string' && typed.id.length > 0) {
+                state.id = typed.id;
+              }
+              if (typeof typed.function?.name === 'string' && typed.function.name.length > 0) {
+                state.name = typed.function.name;
+              }
+              if (typeof typed.function?.arguments === 'string') {
+                state.arguments += typed.function.arguments;
+              }
+            }
           }
           if (chunk.model) {
             model = chunk.model;
@@ -673,6 +764,18 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
         const completionTokens = chunkUsage?.completionTokens ?? estimateTokens(fullContent);
 
         const duration = Date.now() - startTime;
+
+        const collectedToolCalls: OpenAIToolCall[] = toolCallOrder.map((key, idx) => {
+          const state = toolCallState.get(key)!;
+          return {
+            id: state.id ?? `call_${idx}`,
+            type: 'function',
+            function: {
+              name: state.name ?? 'unknown_function',
+              arguments: state.arguments || '{}',
+            },
+          };
+        });
 
         const hasToolCalls = collectedToolCalls.length > 0;
         const fullContentWithNotes = hasToolCalls
